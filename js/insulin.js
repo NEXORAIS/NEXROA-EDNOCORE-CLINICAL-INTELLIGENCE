@@ -1,3 +1,5 @@
+
+Insulin · JS
 /* --- ENDOINSULIN: Dosificación de insulina + triada de automonitoreo ---
  * Módulo nuevo (a petición del Dr. Ortega, 10-ago-2026 — "punto #1" de la
  * ronda), autocontenido igual que interactions.js/screening.js: NO modifica
@@ -24,32 +26,32 @@
  * posprandial (<180 mg/dL general, relajada en pacientes complejos/frágiles)
  * es el estándar ADA Standards of Care 2026 para automonitoreo capilar.
  */
-
+ 
 import { DB_PHARMA } from "./pharma-db.js";
 import { v, getA1cEfectiva } from "./calculations.js";
 import { getA1cTarget, getGlycemicAndBPGoals } from "./individualization.js";
 import { getPatient } from "./state.js";
 import { addOrUpdateRxDose } from "./rx.js";
-
+ 
 const BASAL_IDS = DB_PHARMA.filter((f) => f.grp === "Insulina Basal").map((f) => f.id);
 const PRANDIAL_IDS = DB_PHARMA.filter((f) => f.grp === "Insulina Prandial").map((f) => f.id);
-
+ 
 function activeIds(p, categoria) {
   return ((p.medicacionActual && p.medicacionActual[categoria]) || []).map((e) => e.id);
 }
-
+ 
 export function tieneBasalActiva(p) {
   return activeIds(p, "antidiabetic").some((id) => BASAL_IDS.includes(id));
 }
 export function tienePrandialActiva(p) {
   return activeIds(p, "antidiabetic").some((id) => PRANDIAL_IDS.includes(id));
 }
-
+ 
 function parseRango(str) {
   const m = String(str || "").match(/(\d+)\s*-\s*(\d+)/);
   return m ? { min: Number(m[1]), max: Number(m[2]) } : null;
 }
-
+ 
 /** Mismo criterio de selección de nivel que getGlycemicAndBPGoals en
  * individualization.js — se replica aquí SOLO para elegir el techo
  * posprandial (que no vive en individualization.js); el rango de ayuno
@@ -61,9 +63,9 @@ function resolveGoalTier(p) {
   if (p.bajoRiesgoTratamiento) return "bajoRiesgo";
   return "general";
 }
-
+ 
 const POSPRANDIAL_MAX_POR_NIVEL = { general: 180, bajoRiesgo: 180, sano: 180, complejo: 200, muyComplejo: 200 };
-
+ 
 export function computeGlucoseGoals(p) {
   const tier = resolveGoalTier(p);
   const goals = getGlycemicAndBPGoals({ age: v(p.edad), healthStatus: p.saludStatus || "sano", lowTreatmentBurden: !!p.bajoRiesgoTratamiento });
@@ -71,7 +73,7 @@ export function computeGlucoseGoals(p) {
   const posprandialMax = POSPRANDIAL_MAX_POR_NIVEL[tier] ?? 180;
   return { ayunoMin: ayunoRango.min, ayunoMax: ayunoRango.max, posprandialMax, tier };
 }
-
+ 
 /** Clasifica un punto de glucosa contra su meta.
  * Estados: sin_dato | hipoglucemia_nivel2 (<54 mg/dL, clínicamente
  * significativa) | hipoglucemia_nivel1 (54-69 mg/dL, alerta) | bajo (entre
@@ -102,23 +104,23 @@ function evaluarPunto(valor, min, max) {
   if (val > max) return { estado: "elevado", valor: val };
   return { estado: "en_meta", valor: val };
 }
-
+ 
 export function computeMonitoreo(p) {
   const { ayunoMin, ayunoMax, posprandialMax } = computeGlucoseGoals(p);
   const ayuno = evaluarPunto(p.glucosa, ayunoMin, ayunoMax);
   const nocturna = evaluarPunto(p.glucosaNocturna, ayunoMin, ayunoMax);
   const preprandial = evaluarPunto(p.glucosaPreprandial, ayunoMin, ayunoMax);
   const posprandial = evaluarPunto(p.glucosaPosprandial, null, posprandialMax);
-
+ 
   const puntos = { ayuno, nocturna, preprandial, posprandial };
   const todosSinDato = Object.values(puntos).every((x) => x.estado === "sin_dato");
-
+ 
   let interpretacion, colorInterpretacion;
   const bajoOHipo = (x) => x.estado === "hipoglucemia_nivel1" || x.estado === "hipoglucemia_nivel2" || x.estado === "bajo";
   const basalInsuficiente = ayuno.estado === "elevado" || nocturna.estado === "elevado";
   const basalExcesiva = bajoOHipo(ayuno) || bajoOHipo(nocturna);
   const bolusInsuficiente = preprandial.estado === "elevado" || posprandial.estado === "elevado";
-
+ 
   if (todosSinDato) {
     interpretacion = "Captura el automonitoreo (ayuno/nocturna/preprandial/posprandial) para evaluar si la dosis basal y el bolo son adecuados.";
     colorInterpretacion = "slate";
@@ -138,15 +140,15 @@ export function computeMonitoreo(p) {
     interpretacion = "Control adecuado en los puntos de automonitoreo evaluados.";
     colorInterpretacion = "emerald";
   }
-
+ 
   return { ...puntos, interpretacion, colorInterpretacion, basalInsuficiente, basalExcesiva, bolusInsuficiente };
 }
-
+ 
 /** Dosis de insulina BASAL — ver reglas citadas en el encabezado del archivo. */
 export function computeBasalInsulinDose(p) {
   const peso = v(p.peso);
   if (peso <= 0) return { estado: "sin_peso" };
-
+ 
   if (!tieneBasalActiva(p)) {
     return {
       estado: "virgen",
@@ -155,16 +157,16 @@ export function computeBasalInsulinDose(p) {
       fuente: "0.1-0.2 UI/kg/día (pharma-db.js — Glargina/Degludec/Detemir/NPH) × peso real del paciente.",
     };
   }
-
+ 
   const a1c = getA1cEfectiva(p);
   const a1cTarget = getA1cTarget({ age: v(p.edad), healthStatus: p.saludStatus || "sano", lowTreatmentBurden: !!p.bajoRiesgoTratamiento });
   const a1cEnMeta = a1c.value > 0 ? a1c.value <= a1cTarget : null;
   const { basalInsuficiente, basalExcesiva } = computeMonitoreo(p);
-
+ 
   if (a1cEnMeta === null && !basalInsuficiente && !basalExcesiva) {
     return { estado: "establecida_sin_datos_de_control", fuente: "Captura A1c y/o glucosa en ayuno/nocturna para evaluar si la basal actual es adecuada." };
   }
-
+ 
   if (a1cEnMeta === false || basalInsuficiente) {
     return {
       estado: "establecida_no_en_metas",
@@ -172,27 +174,32 @@ export function computeBasalInsulinDose(p) {
       fuente: "Ya con basal establecida y NO en metas -> considerar escalar hacia 0.5 UI/kg/día (techo antes de intensificar con bolo u otro agente).",
     };
   }
-
+ 
   if (basalExcesiva) {
     return { estado: "establecida_riesgo_hipoglucemia", fuente: "Ayuno/nocturna bajo meta -> considerar REDUCIR la dosis basal actual antes de cualquier otro ajuste." };
   }
-
+ 
   return { estado: "establecida_en_metas", fuente: "A1c y automonitoreo disponible dentro de meta — dosis basal actual parece adecuada." };
 }
-
-/** Dosis de insulina PRANDIAL/BOLO — solo se muestra si hay indicación real
- * (ya está en esquema basal-bolo, o hay evidencia de que lo necesita). */
-export function computePrandialInsulinDose(p) {
+ 
+/** Rango de INICIO por peso (0.05-0.1 UI/kg/comida), sin la dosis de
+ * corrección. Separada de computePrandialInsulinDose para poder usarse
+ * dentro de estimateTDD sin crear una dependencia circular: estimateTDD
+ * necesita este rango para estimar la TDD, y la dosis de corrección
+ * (computeBolusCorrection) necesita la TDD para calcular el ISF — si
+ * computePrandialInsulinDose llamara a computeBolusCorrection y
+ * estimateTDD llamara a computePrandialInsulinDose, ambas se llamarían
+ * entre sí sin fin. */
+function computePrandialBaseRange(p, monitoreo) {
   const peso = v(p.peso);
-  const monitoreo = computeMonitoreo(p);
   const yaBasal = tieneBasalActiva(p);
   const yaPrandial = tienePrandialActiva(p);
-
+ 
   const necesitaPorMonitoreo = yaBasal && !monitoreo.basalInsuficiente && !monitoreo.basalExcesiva && monitoreo.bolusInsuficiente;
-
+ 
   if (!yaPrandial && !necesitaPorMonitoreo) return { aplica: false };
   if (peso <= 0) return { aplica: true, estado: "sin_peso" };
-
+ 
   return {
     aplica: true,
     estado: yaPrandial ? "activo_reevaluar" : "sugerido_nuevo",
@@ -204,7 +211,22 @@ export function computePrandialInsulinDose(p) {
       : "Ayuno/nocturna en meta pero preprandial/posprandial elevada — sugiere iniciar bolo prandial.",
   };
 }
-
+ 
+/** Dosis de insulina PRANDIAL/BOLO — solo se muestra si hay indicación real
+ * (ya está en esquema basal-bolo, o hay evidencia de que lo necesita).
+ * Combina el rango de inicio por peso (computePrandialBaseRange) con la
+ * dosis de corrección YA calculada a partir de la glucosa pre/posprandial
+ * real (computeBolusCorrection) — ver el comentario de esa función para el
+ * porqué se agregó (16-ago-2026, a petición del Dr. Ortega). */
+export function computePrandialInsulinDose(p) {
+  const monitoreo = computeMonitoreo(p);
+  const base = computePrandialBaseRange(p, monitoreo);
+  if (!base.aplica) return base;
+ 
+  const correccion = computeBolusCorrection(p, monitoreo);
+  return { ...base, correccion };
+}
+ 
 /* ==================== CALCULADORAS DE TITULACIÓN ====================
  * Agregadas el 11-ago-2026, a petición del Dr. Ortega ("índice glucémico,
  * índice de corrección... hay otros que hay que revisar" — aclarado en la
@@ -241,11 +263,11 @@ export function computePrandialInsulinDose(p) {
  * por el médico tratante — no sustituyen la titulación individualizada
  * basada en la respuesta real del paciente a lo largo de varias semanas.
  */
-
+ 
 const REGLA_ISF_RAPIDA = 1800;
 const REGLA_ISF_REGULAR = 1500;
 const REGLA_ICR = 500;
-
+ 
 /** Estimación de partida de la Dosis Diaria Total (TDD), a partir de las
  * mismas sugerencias basal/prandial que ya calcula este módulo. Regresa 0
  * si no hay peso capturado (no se puede estimar nada). Es un punto de
@@ -253,34 +275,36 @@ const REGLA_ICR = 500;
 export function estimateTDD(p) {
   const peso = v(p.peso);
   if (peso <= 0) return 0;
-
+ 
   const basal = computeBasalInsulinDose(p);
   let basalUI = 0;
   if (basal.estado === "virgen") basalUI = (basal.dosisMinUI + basal.dosisMaxUI) / 2;
   else if (basal.estado === "establecida_no_en_metas") basalUI = basal.dosisObjetivoUI;
   else basalUI = peso * 0.15; // ya en metas o riesgo de hipoglucemia y sin otro número mejor — punto medio genérico
-
-  const prandial = computePrandialInsulinDose(p);
+ 
+  // Usa el rango base (sin corrección) para no depender circularmente de
+  // computeBolusCorrection, que a su vez necesita esta TDD para el ISF.
+  const prandial = computePrandialBaseRange(p, computeMonitoreo(p));
   const prandialUI = prandial.aplica && prandial.dosisMinUI != null
     ? ((prandial.dosisMinUI + prandial.dosisMaxUI) / 2) * 3 // 3 comidas, supuesto estándar
     : 0;
-
+ 
   return Math.round(basalUI + prandialUI);
 }
-
+ 
 /** Factor de Sensibilidad a la Insulina (ISF), en mg/dL por UI. */
 export function computeISF(tdd, { insulinaRegular = false } = {}) {
   if (!(tdd > 0)) return null;
   const regla = insulinaRegular ? REGLA_ISF_REGULAR : REGLA_ISF_RAPIDA;
   return Math.round(regla / tdd);
 }
-
+ 
 /** Relación Insulina:Carbohidratos (ICR), en gramos de carbohidrato por UI. */
 export function computeICR(tdd) {
   if (!(tdd > 0)) return null;
   return Math.round(REGLA_ICR / tdd);
 }
-
+ 
 /** Dosis de corrección: (glucosa actual − meta) / ISF. Nunca negativa —
  * si la glucosa ya está en o bajo la meta, la dosis de corrección es 0. */
 export function computeCorrectionDose(glucosaActual, metaGlucosa, isf) {
@@ -289,7 +313,7 @@ export function computeCorrectionDose(glucosaActual, metaGlucosa, isf) {
   if (diff <= 0) return 0;
   return Math.round((diff / isf) * 10) / 10;
 }
-
+ 
 /** TDD manual (Dosis Diaria Total) — estado local al módulo, igual que
  * `addedDrugs` en rx.js: es un valor de trabajo de la calculadora, no un
  * campo del formulario de Ingreso Clínico ni algo que deba viajar en el
@@ -304,7 +328,51 @@ export function setTDDOverride(value) {
 }
 export function getTDDOverride() { return tddOverride; }
 export function resetTDDOverride() { tddOverride = null; }
-
+ 
+/** Dosis de CORRECCIÓN del bolo, calculada automáticamente a partir de la
+ * glucosa preprandial/posprandial ya capturada en Ingreso Clínico — a
+ * petición del Dr. Ortega ("necesito que ya tomando en cuenta la glucosa
+ * pre y posprandial que estén mal, que dé el recuadro del bolo ya
+ * calculado", 16-ago-2026).
+ *
+ * ANTES: el recuadro de Insulina Prandial solo mostraba el rango de INICIO
+ * por peso (0.05-0.1 UI/kg/comida) — nunca calculaba nada con el valor de
+ * glucosa realmente capturado, aunque esa fórmula ((glucosa−meta)/ISF) ya
+ * existía en la calculadora manual de Titulación (computeCorrectionDose).
+ * El médico tenía que volver a teclear esos mismos números ahí abajo para
+ * obtener un número. Esta función reutiliza exactamente esa fórmula, la
+ * aplica automáticamente a preprandial y/o posprandial cuando la Triada de
+ * Automonitoreo ya los marca como "elevado", y la muestra directo en el
+ * recuadro del Bolo.
+ *
+ * METAS usadas para la corrección (no son un número nuevo, son las mismas
+ * metas de mantenimiento que ya usa el resto del panel):
+ *   - Preprandial -> techo de la meta de ayuno (computeGlucoseGoals.ayunoMax,
+ *     misma meta que ya evalúa la Triada para ese punto).
+ *   - Posprandial -> techo posprandial (computeGlucoseGoals.posprandialMax).
+ *
+ * TDD/ISF usados: los MISMOS que alimentan el panel de Titulación (TDD
+ * manual si el médico ya la capturó ahí, o estimateTDD si no) — así el
+ * número que aparece en el recuadro del Bolo y el que aparece en Titulación
+ * siempre son coherentes entre sí, nunca dos cálculos independientes. */
+function computeBolusCorrection(p, monitoreo) {
+  const tdd = tddOverride != null ? tddOverride : estimateTDD(p);
+  const isf = computeISF(tdd);
+  if (!isf) return { disponible: false };
+ 
+  const { ayunoMax, posprandialMax } = computeGlucoseGoals(p);
+  const m = monitoreo || computeMonitoreo(p);
+ 
+  const pre = m.preprandial.estado === "elevado"
+    ? { valor: m.preprandial.valor, meta: ayunoMax, dosisUI: computeCorrectionDose(m.preprandial.valor, ayunoMax, isf) }
+    : null;
+  const post = m.posprandial.estado === "elevado"
+    ? { valor: m.posprandial.valor, meta: posprandialMax, dosisUI: computeCorrectionDose(m.posprandial.valor, posprandialMax, isf) }
+    : null;
+ 
+  return { disponible: true, isf, tdd, tddEsEstimado: tddOverride == null, pre, post };
+}
+ 
 /** Ensambla todo — usado tanto por el render como por las pruebas.
  *
  * ACTUALIZACIÓN (11-ago-2026, a petición del Dr. Ortega): el corte de A1c
@@ -322,7 +390,7 @@ export function computeInsulinAssessment(p) {
   const esDiabetico = p.tipoDM === "DM1" || p.tipoDM === "DM2";
   const aplica = esDiabetico || tieneBasalActiva(p) || tienePrandialActiva(p) || getA1cEfectiva(p).value > 9;
   if (!aplica) return { aplica: false };
-
+ 
   const tdd = tddOverride != null ? tddOverride : estimateTDD(p);
   const titulacion = {
     tdd,
@@ -330,7 +398,7 @@ export function computeInsulinAssessment(p) {
     isf: computeISF(tdd),
     icr: computeICR(tdd),
   };
-
+ 
   return {
     aplica: true,
     basal: computeBasalInsulinDose(p),
@@ -339,9 +407,9 @@ export function computeInsulinAssessment(p) {
     titulacion,
   };
 }
-
+ 
 /* ==================== RENDER (DOM) ==================== */
-
+ 
 const BASAL_UI = {
   sin_peso: { badge: "Captura el peso", cls: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
   virgen: { badge: "Virgen de insulina", cls: "bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300" },
@@ -350,14 +418,14 @@ const BASAL_UI = {
   establecida_no_en_metas: { badge: "NO en metas", cls: "bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300" },
   establecida_riesgo_hipoglucemia: { badge: "Riesgo de hipoglucemia", cls: "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300" },
 };
-
+ 
 function buildDrugOptionsHTML(idsList, selectedId) {
   return idsList.map((id) => {
     const f = DB_PHARMA.find((x) => x.id === id);
     return `<option value="${id}" ${id === selectedId ? "selected" : ""}>${f ? f.name : id}</option>`;
   }).join("");
 }
-
+ 
 /** Botón + selector "Aplicar a EndoNote" — solo se ofrece cuando hay una
  * dosis numérica concreta que tenga sentido escribir en la receta. Si ya
  * hay UN fármaco activo de ese tipo, se aplica directo a ese id (sin
@@ -376,7 +444,7 @@ function buildAplicarHTML({ selectId, applyFn, idsList, activos }) {
     </button>
   </div>`;
 }
-
+ 
 function buildBasalHTML(basal, p) {
   const ui = BASAL_UI[basal.estado] || BASAL_UI.sin_peso;
   const activos = activeIds(p, "antidiabetic").filter((id) => BASAL_IDS.includes(id));
@@ -403,13 +471,34 @@ function buildBasalHTML(basal, p) {
     ${aplicar}
   </div>`;
 }
-
+ 
+/** Recuadro "Dosis de corrección calculada" — muestra el número YA
+ * calculado con la glucosa pre/posprandial real del paciente (no solo el
+ * rango de inicio por peso). Ver computeBolusCorrection para la fórmula y
+ * las metas usadas. */
+function buildCorreccionHTML(correccion) {
+  if (!correccion || !correccion.disponible) {
+    return `<p class="text-[10px] text-amber-600 dark:text-amber-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">Captura el peso y/o la TDD (panel de Titulación, más abajo) para que este recuadro calcule la dosis de corrección con la glucosa pre/posprandial ya registrada.</p>`;
+  }
+  const { pre, post, isf, tdd, tddEsEstimado } = correccion;
+  if (!pre && !post) return "";
+  const filas = [];
+  if (pre) filas.push(`<p class="text-xs"><span class="font-bold text-slate-700 dark:text-slate-200">Preprandial ${pre.valor} mg/dL</span> (meta ≤${pre.meta}) → <span class="font-black text-violet-600 dark:text-violet-400">+${pre.dosisUI} UI de corrección</span></p>`);
+  if (post) filas.push(`<p class="text-xs"><span class="font-bold text-slate-700 dark:text-slate-200">Posprandial ${post.valor} mg/dL</span> (meta ≤${post.meta}) → <span class="font-black text-violet-600 dark:text-violet-400">+${post.dosisUI} UI de corrección</span></p>`);
+  return `<div class="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1 bg-violet-50/50 dark:bg-violet-900/10 -mx-4 -mb-4 px-4 pb-4 rounded-b-2xl">
+    <p class="text-[10px] font-black text-violet-600 dark:text-violet-400 uppercase mb-1 flex items-center gap-1.5"><i data-lucide="calculator" class="w-3 h-3"></i> Dosis de corrección — ya calculada</p>
+    ${filas.join("")}
+    <p class="text-[9px] text-slate-400">ISF ${isf} mg/dL por UI · TDD ${tdd} UI${tddEsEstimado ? " (estimada)" : ""} — misma fórmula y datos que la calculadora de Titulación.</p>
+  </div>`;
+}
+ 
 function buildPrandialHTML(prandial, p) {
   if (!prandial.aplica) return "";
   if (prandial.estado === "sin_peso") {
     return `<div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 hover:shadow-lg hover:shadow-orange-200/40 dark:hover:shadow-orange-950/30 hover:border-orange-300 dark:hover:border-orange-700 hover:-translate-y-0.5 transition-all duration-200">
       <p class="flex items-center gap-2 text-xs font-black text-slate-500 dark:text-slate-400 uppercase mb-2"><i data-lucide="droplet" class="w-3.5 h-3.5"></i> Insulina Prandial (Bolo)</p>
       <p class="text-sm text-slate-500 dark:text-slate-400">Captura el peso del paciente para calcular la dosis.</p>
+      ${buildCorreccionHTML(prandial.correccion)}
     </div>`;
   }
   const badge = prandial.estado === "activo_reevaluar" ? { t: "Reevaluar ajuste", c: "bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300" } : { t: "Sugerido — nuevo", c: "bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300" };
@@ -423,10 +512,11 @@ function buildPrandialHTML(prandial, p) {
     <p class="text-2xl font-black text-slate-800 dark:text-white font-data">${prandial.dosisMinUI}–${prandial.dosisMaxUI} <span class="text-sm font-bold text-slate-400">UI/comida</span></p>
     <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">${prandial.detalle}</p>
     <p class="text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">${prandial.fuente}</p>
+    ${buildCorreccionHTML(prandial.correccion)}
     ${aplicar}
   </div>`;
 }
-
+ 
 /** Determina a qué fármaco (id) aplica la dosis: si hay exactamente un
  * fármaco activo de ese tipo, se usa directo (no hay selector en el DOM);
  * si hay 0 o >1, se lee el <select> correspondiente. */
@@ -435,7 +525,7 @@ function resolveTargetId(selectId, activos) {
   const sel = document.getElementById(selectId);
   return sel ? sel.value : activos[0] || null;
 }
-
+ 
 function flashApplied(btnId) {
   const btn = document.getElementById(btnId);
   if (!btn) return;
@@ -449,7 +539,7 @@ function flashApplied(btnId) {
     if (typeof lucide !== "undefined") lucide.createIcons();
   }, 1800);
 }
-
+ 
 /** Botón "Aplicar a EndoNote" de la insulina BASAL — escribe la dosis
  * sugerida/techo actual como la dosis de ese fármaco en EndoNote (crea la
  * entrada si no existía, o actualiza la dosis si ya estaba). Deliberadamente
@@ -467,7 +557,7 @@ export function applyBasalDoseToEndoNote() {
   addOrUpdateRxDose(targetId, doseText);
   flashApplied("insulinBasalDrugSelectApplyBtn");
 }
-
+ 
 /** Botón "Aplicar a EndoNote" de la insulina PRANDIAL — mismo patrón que
  * applyBasalDoseToEndoNote. */
 export function applyPrandialDoseToEndoNote() {
@@ -480,7 +570,7 @@ export function applyPrandialDoseToEndoNote() {
   addOrUpdateRxDose(targetId, `${prandial.dosisMinUI}-${prandial.dosisMaxUI} UI/comida`);
   flashApplied("insulinPrandialDrugSelectApplyBtn");
 }
-
+ 
 const PUNTO_UI = {
   sin_dato: { label: "Sin dato", cls: "text-slate-400" },
   // Nivel 2 (<54): clínicamente significativa — un tono más oscuro/urgente
@@ -492,7 +582,7 @@ const PUNTO_UI = {
   en_meta: { label: "En meta", cls: "text-emerald-600 dark:text-emerald-400 font-bold" },
   elevado: { label: "Elevado", cls: "text-red-600 dark:text-red-400 font-bold" },
 };
-
+ 
 function buildMonitoreoHTML(m) {
   const filas = [
     ["Ayuno", m.ayuno, "sunrise"],
@@ -504,7 +594,7 @@ function buildMonitoreoHTML(m) {
     red: "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800",
     amber: "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800",
     emerald: "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800" };
-
+ 
   return `<div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 hover:shadow-lg hover:shadow-orange-200/40 dark:hover:shadow-orange-950/30 hover:border-orange-300 dark:hover:border-orange-700 hover:-translate-y-0.5 transition-all duration-200 sm:col-span-2">
     <p class="flex items-center gap-2 text-xs font-black text-slate-500 dark:text-slate-400 uppercase mb-3"><i data-lucide="line-chart" class="w-3.5 h-3.5"></i> Triada de Automonitoreo Glucémico</p>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -518,19 +608,19 @@ function buildMonitoreoHTML(m) {
     <div class="p-3 rounded-xl border text-xs font-semibold ${INTERP_CLS[m.colorInterpretacion]}">${m.interpretacion}</div>
   </div>`;
 }
-
+ 
 function readNum(id) {
   const el = document.getElementById(id);
   if (!el || el.value.trim() === "") return null;
   const n = Number(el.value);
   return Number.isNaN(n) ? null : n;
 }
-
+ 
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
 }
-
+ 
 /** Recalcula ISF/ICR al editar la TDD (input libre, ver buildTitulacionHTML)
  * — actualiza SOLO los spans de salida (no redibuja el panel completo) para
  * no perder el foco del input mientras el médico escribe, mismo criterio ya
@@ -544,7 +634,7 @@ export function insulinRecalcTitulacion() {
   setText("insulinICROut", icr != null ? `${icr} g de carbohidrato por UI` : "Captura la TDD");
   insulinRecalcCorreccion();
 }
-
+ 
 /** Recalcula la dosis de corrección al editar glucosa actual/meta — mismo
  * criterio de actualización puntual que insulinRecalcTitulacion. */
 export function insulinRecalcCorreccion() {
@@ -555,7 +645,7 @@ export function insulinRecalcCorreccion() {
   const dosis = computeCorrectionDose(glucosa, meta, isf);
   setText("insulinCorrOut", dosis != null ? `${dosis} UI de corrección` : "Completa glucosa, meta y TDD");
 }
-
+ 
 function buildTitulacionHTML(a) {
   const t = a.titulacion;
   return `<div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 hover:shadow-lg hover:shadow-orange-200/40 dark:hover:shadow-orange-950/30 hover:border-orange-300 dark:hover:border-orange-700 hover:-translate-y-0.5 transition-all duration-200 sm:col-span-2">
@@ -595,7 +685,7 @@ function buildTitulacionHTML(a) {
     <p class="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">Reglas prácticas estándar de educación en diabetes: ISF = 1800/TDD (análogos rápidos) o 1500/TDD (Regular); ICR = 500/TDD; dosis de corrección = (glucosa actual − meta) / ISF. Punto de partida para ajuste fino por el médico tratante — no sustituye la titulación individualizada.</p>
   </div>`;
 }
-
+ 
 /* Desplegable (12-ago-2026, a petición del Dr. Ortega): "Consideraciones
  * Reales de Titulación" es contenido educativo denso y de referencia — no
  * un dato del paciente que se necesite ver siempre. Se usa <details> nativo
@@ -636,7 +726,7 @@ function buildEducativoHTML() {
     </div>
   </details>`;
 }
-
+ 
 /** Redibuja #insulinPanelRoot — ahora vive en su propia pestaña de nivel
  * superior del sidebar (`view-insulin`, ver navigation.js -> showInsulinTab
  * y render.js -> renderAll), no dentro de EndoManagement. Movido el
@@ -655,7 +745,7 @@ function buildEducativoHTML() {
 export function renderInsulinPanel(p) {
   const root = document.getElementById("insulinPanelRoot");
   if (!root) return;
-
+ 
   const a = computeInsulinAssessment(p || {});
   if (!a.aplica) {
     root.innerHTML = `<div class="bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3 text-xs text-slate-400">
@@ -665,7 +755,7 @@ export function renderInsulinPanel(p) {
     if (typeof lucide !== "undefined") lucide.createIcons();
     return;
   }
-
+ 
   root.innerHTML = `
     <div class="grid sm:grid-cols-2 gap-3 mb-6">
       ${buildBasalHTML(a.basal, p || {})}
@@ -674,6 +764,8 @@ export function renderInsulinPanel(p) {
       ${buildTitulacionHTML(a)}
       ${buildEducativoHTML()}
     </div>`;
-
+ 
   if (typeof lucide !== "undefined") lucide.createIcons();
 }
+ 
+Descargado vias_lipidos_farmacos.html Mostrar en el Explorador
