@@ -1,6 +1,6 @@
 
 Insulin · JS
-/* --- ENDOINSULIN: Dosificación de insulina + triada de automonitoreo ---
+/** --- ENDOINSULIN: Dosificación de insulina + triada de automonitoreo ---
  * Módulo nuevo (a petición del Dr. Ortega, 10-ago-2026 — "punto #1" de la
  * ronda), autocontenido igual que interactions.js/screening.js: NO modifica
  * buildAntidiabeticPlan ni el resto de calculations.js. Se integra en
